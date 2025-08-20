@@ -2,7 +2,7 @@ import { Runtime, Function, Code } from "aws-cdk-lib/aws-lambda";
 import { NodejsFunctionProps } from "aws-cdk-lib/aws-lambda-nodejs";
 import { Bucket } from "aws-cdk-lib/aws-s3";
 import { Construct } from "constructs";
-import { basename, join } from "path";
+import { basename, resolve } from "path";
 
 export function LocalFunction(
   scope: Construct,
@@ -23,7 +23,10 @@ export function LocalFunction(
 
   return new Function(scope, id, {
     ...props,
-    code: Code.fromBucket(hotReloadBucket, join(__dirname, "lambdas/build")),
+    code: Code.fromBucket(
+      hotReloadBucket,
+      resolve(__dirname, "../lambdas/build")
+    ),
     runtime,
     handler: `${fileName}.${handler}`,
   });
