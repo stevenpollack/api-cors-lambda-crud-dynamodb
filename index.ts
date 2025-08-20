@@ -1,7 +1,7 @@
 import { LambdaIntegration, RestApi } from "aws-cdk-lib/aws-apigateway";
 import { AttributeType, Table } from "aws-cdk-lib/aws-dynamodb";
 import { Architecture, Runtime } from "aws-cdk-lib/aws-lambda";
-import { App, Stack, RemovalPolicy, Tags } from "aws-cdk-lib";
+import { App, Stack, RemovalPolicy, Tags, CfnOutput } from "aws-cdk-lib";
 import { NodejsFunctionProps } from "aws-cdk-lib/aws-lambda-nodejs";
 import { join } from "path";
 import { ApplicationFunction } from "./utils/ApplicationFunction";
@@ -41,44 +41,6 @@ export class ApiLambdaCrudDynamoDBStack extends Stack {
       runtime: Runtime.NODEJS_LATEST,
     };
 
-    // Create a Lambda function for each of the CRUD operations
-    const getOneLambda = ApplicationFunction(this, "getOneItemFunction", {
-      entry: join(__dirname, "lambdas/src", "get-one.ts"),
-      ...nodeJsFunctionProps,
-    });
-
-    const getAllLambda = ApplicationFunction(this, "getAllItemsFunction", {
-      entry: join(__dirname, "lambdas/src", "get-all.ts"),
-      ...nodeJsFunctionProps,
-    });
-
-    const createOneLambda = ApplicationFunction(this, "createItemFunction", {
-      entry: join(__dirname, "lambdas/src", "create.ts"),
-      ...nodeJsFunctionProps,
-    });
-    const updateOneLambda = ApplicationFunction(this, "updateItemFunction", {
-      entry: join(__dirname, "lambdas/src", "update-one.ts"),
-      ...nodeJsFunctionProps,
-    });
-    const deleteOneLambda = ApplicationFunction(this, "deleteItemFunction", {
-      entry: join(__dirname, "lambdas/src", "delete-one.ts"),
-      ...nodeJsFunctionProps,
-    });
-
-    // Grant the Lambda function read access to the DynamoDB table
-    dynamoTable.grantReadWriteData(getAllLambda);
-    dynamoTable.grantReadWriteData(getOneLambda);
-    dynamoTable.grantReadWriteData(createOneLambda);
-    dynamoTable.grantReadWriteData(updateOneLambda);
-    dynamoTable.grantReadWriteData(deleteOneLambda);
-
-    // Integrate the Lambda functions with the API Gateway resource
-    const getAllIntegration = new LambdaIntegration(getAllLambda);
-    const createOneIntegration = new LambdaIntegration(createOneLambda);
-    const getOneIntegration = new LambdaIntegration(getOneLambda);
-    const updateOneIntegration = new LambdaIntegration(updateOneLambda);
-    const deleteOneIntegration = new LambdaIntegration(deleteOneLambda);
-
     // Create an API Gateway resource for each of the CRUD operations
     const api = new RestApi(this, "itemsApi", {
       restApiName: "Items Service",
@@ -88,16 +50,62 @@ export class ApiLambdaCrudDynamoDBStack extends Stack {
 
     Tags.of(api).add("_custom_id_", "crudapp");
 
+    // setup /items/{id} resources and add CORS options
     const items = api.root.addResource("items");
-    items.addMethod("GET", getAllIntegration);
-    items.addMethod("POST", createOneIntegration);
-    addCorsOptions(items);
-
     const singleItem = items.addResource("{id}");
-    singleItem.addMethod("GET", getOneIntegration);
-    singleItem.addMethod("PATCH", updateOneIntegration);
-    singleItem.addMethod("DELETE", deleteOneIntegration);
+
+    addCorsOptions(items);
     addCorsOptions(singleItem);
+
+    const lambdas = [
+      {
+        filename: "get-one.ts",
+        functionName: "getOneItemFunction",
+        resource: singleItem,
+        method: "GET",
+      },
+      {
+        filename: "get-all.ts",
+        functionName: "getAllItemsFunction",
+        resource: items,
+        method: "GET",
+      },
+      {
+        filename: "create.ts",
+        functionName: "createItemFunction",
+        resource: items,
+        method: "POST",
+      },
+      {
+        filename: "update-one.ts",
+        functionName: "updateItemFunction",
+        resource: singleItem,
+        method: "PATCH",
+      },
+      {
+        filename: "delete-one.ts",
+        functionName: "deleteItemFunction",
+        resource: singleItem,
+        method: "DELETE",
+      },
+    ];
+
+    lambdas.forEach(({ filename, functionName, resource, method }) => {
+      const lambdaFunction = ApplicationFunction(this, functionName, {
+        entry: join(__dirname, "lambdas/src", filename),
+        ...nodeJsFunctionProps,
+      });
+
+      dynamoTable.grantReadWriteData(lambdaFunction);
+      const integration = new LambdaIntegration(lambdaFunction);
+
+      resource.addMethod(method, integration);
+
+      new CfnOutput(this, `${functionName}Url`, {
+        value: `${method} ${api.urlForPath(resource.path)}`,
+        description: `URL for ${functionName}`,
+      });
+    });
   }
 }
 
