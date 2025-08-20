@@ -1,22 +1,12 @@
-import {
-  IResource,
-  LambdaIntegration,
-  MockIntegration,
-  PassthroughBehavior,
-  RestApi,
-} from "aws-cdk-lib/aws-apigateway";
+import { LambdaIntegration, RestApi } from "aws-cdk-lib/aws-apigateway";
 import { AttributeType, Table } from "aws-cdk-lib/aws-dynamodb";
-import { Architecture, Code, Function, Runtime } from "aws-cdk-lib/aws-lambda";
+import { Architecture, Runtime } from "aws-cdk-lib/aws-lambda";
 import { App, Stack, RemovalPolicy, Tags } from "aws-cdk-lib";
-import {
-  NodejsFunction,
-  NodejsFunctionProps,
-} from "aws-cdk-lib/aws-lambda-nodejs";
-import { join, basename } from "path";
-import { Bucket } from "aws-cdk-lib/aws-s3";
-import { Construct } from "constructs";
+import { NodejsFunctionProps } from "aws-cdk-lib/aws-lambda-nodejs";
+import { join } from "path";
+import { ApplicationFunction } from "./utils/ApplicationFunction";
+import { addCorsOptions } from "./utils/addCorsOptions";
 
-const STAGE = process.env.STAGE ?? "local";
 export class ApiLambdaCrudDynamoDBStack extends Stack {
   constructor(app: App, id: string) {
     super(app, id);
@@ -48,7 +38,7 @@ export class ApiLambdaCrudDynamoDBStack extends Stack {
         TABLE_NAME: dynamoTable.tableName,
       },
       architecture: Architecture.ARM_64,
-      runtime: Runtime.NODEJS_18_X,
+      runtime: Runtime.NODEJS_LATEST,
     };
 
     // Create a Lambda function for each of the CRUD operations
@@ -109,84 +99,6 @@ export class ApiLambdaCrudDynamoDBStack extends Stack {
     singleItem.addMethod("DELETE", deleteOneIntegration);
     addCorsOptions(singleItem);
   }
-}
-
-export function addCorsOptions(apiResource: IResource) {
-  apiResource.addMethod(
-    "OPTIONS",
-    new MockIntegration({
-      // In case you want to use binary media types, uncomment the following line
-      // contentHandling: ContentHandling.CONVERT_TO_TEXT,
-      integrationResponses: [
-        {
-          statusCode: "200",
-          responseParameters: {
-            "method.response.header.Access-Control-Allow-Headers":
-              "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token,X-Amz-User-Agent'",
-            "method.response.header.Access-Control-Allow-Origin": "'*'",
-            "method.response.header.Access-Control-Allow-Credentials":
-              "'false'",
-            "method.response.header.Access-Control-Allow-Methods":
-              "'OPTIONS,GET,PUT,POST,DELETE'",
-          },
-        },
-      ],
-      // In case you want to use binary media types, comment out the following line
-      passthroughBehavior: PassthroughBehavior.NEVER,
-      requestTemplates: {
-        "application/json": '{"statusCode": 200}',
-      },
-    }),
-    {
-      methodResponses: [
-        {
-          statusCode: "200",
-          responseParameters: {
-            "method.response.header.Access-Control-Allow-Headers": true,
-            "method.response.header.Access-Control-Allow-Methods": true,
-            "method.response.header.Access-Control-Allow-Credentials": true,
-            "method.response.header.Access-Control-Allow-Origin": true,
-          },
-        },
-      ],
-    }
-  );
-}
-
-export function ApplicationFunction(
-  scope: Construct,
-  id: string,
-  props: NodejsFunctionProps
-) {
-  if (STAGE === "local") {
-    return LocalFunction(scope, id, props);
-  }
-  return new NodejsFunction(scope, id, props);
-}
-
-export function LocalFunction(
-  scope: Construct,
-  id: string,
-  props: NodejsFunctionProps
-) {
-  const hotReloadBucket = Bucket.fromBucketName(
-    scope,
-    `HotReloadingBucket-${id}`,
-    "hot-reload"
-  );
-
-  if (!props.entry) throw new Error('Entry point is required');
-
-  const fileName = basename(props.entry, ".ts");
-  const handler = props.handler ?? "handler";
-  const runtime = props.runtime || Runtime.NODEJS_18_X;
-
-  return new Function(scope, id, {
-    ...props,
-    code: Code.fromBucket(hotReloadBucket, join(__dirname, "lambdas/build")),
-    runtime,
-    handler: `${fileName}.${handler}`,
-  });
 }
 
 const app = new App();
